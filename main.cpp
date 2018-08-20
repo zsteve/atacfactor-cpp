@@ -9,12 +9,23 @@
 #include <unistd.h>
 #include <climits>
 #include <algorithm>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <argparse/argparse.hpp>
+
 
 #include "kde/kde.h"
 using namespace std;
 
 char** chr_table = NULL;
 int n_chr = 0;
+
+typedef struct footprint_t{
+	vector<int> peaks;
+	vector<int> fp;
+	int centre;
+	int peakidx;
+}footprint_t;
 
 // only use malloc()/free() for chromosome table
 char* get_chr_ptr(const char* chr_name){
@@ -59,6 +70,7 @@ struct {
 	double abs_thresh = 0;
 	double rel_thresh = 0.5;
 	double prominence = 0.9;
+	int min_reads = 500;
 }param;
 
 double density(read_range reads, double bw, double* x, double* y, int n=512){
@@ -84,7 +96,7 @@ double density(read_range reads, double bw, double* x, double* y, int n=512){
 	double max_y = 0.0;
 
 	int i = 0;
-	for(double obs = start; obs < end - (step/2); obs += step){
+	for(double obs = start; i < n; obs += step){
 		double prob = 0;
 		r = reads.begin;
 		do{
@@ -131,9 +143,9 @@ vector<int> find_peaks(double* y, int start, int end, double thresh){
 
 	/** descend backward from the scope global max **/
 	i = max_idx;
-	while(i >= start && y[i] > max*param.prominence) i--;
+	while(i > start && y[i] > max*param.prominence) i--;
 	min = y[i];
-	while(i >= start && y[i] < min/param.prominence){
+	while(i > start && y[i] < min/param.prominence){
 		if(min > y[i]) min = y[i]; i--;
 	}
 	/** now RECURSE again OwO **/
@@ -143,41 +155,103 @@ vector<int> find_peaks(double* y, int start, int end, double thresh){
 	return peaks;
 }
 
+vector<int> find_footprints(double* y, vector<int>& peaks){
+	if(peaks.size() > 1){
+		vector<int> fp(peaks.size()-1);
+		for(int i = 0; i < peaks.size()-1; i++){
+			double min = DBL_MAX; int min_idx = peaks[i];
+			for(int j = peaks[i]; j < peaks[i+1]; j++){
+				if(y[j] < min){
+					min = y[j]; min_idx = j; 
+				}
+			}
+			fp[i] = min_idx; 
+		}
+		return fp;
+	}
+	return vector<int>();	// no footprints
+}
+
+int find_centre(vector<int>& peaks, vector<int>& fp){
+	if(fp.size() % 2 == 0){ // even # of footprints, centre on middle peak
+		return peaks[peaks.size()/2];
+	}
+	// odd # of footprints, centre on middle footprint
+	return fp[fp.size()/2];
+}
+
 void* thread_worker(void* arg){
 	/** thread worker **/
 	/** arg --> std::pair<int, int> that 
 	 * specify the first and last peaks that contribute
 	 * to given workload
 	 */
+	cerr << "Thread starting: " << (long int)syscall(SYS_gettid) << endl;
 	
 	int a, b;
 	a = ((std::pair<int, int>*)arg)->first;
 	b = ((std::pair<int, int>*)arg)->second;
 
+	vector<footprint_t>* results = new vector<footprint_t>; results->reserve(b - a + 1);
 
 	double x[512];
 	double y[512];
 
 	for(int i = a; i <= b; i++){
-		// insert - check for n_reads > threshold
+		int n_reads = peak_idx[i].end - peak_idx[i].begin + 1;
+		if(n_reads < param.min_reads) continue;
+		
 		double max_y = density(peak_idx[i], param.bandwidth, x, y);
 		double threshold = std::max(param.abs_thresh, max_y*param.rel_thresh);
 		vector<int> peaks = find_peaks(y, 0, 512, threshold);
-		cout << "size = " << peaks.size() << endl;
+		if(peaks.size() > 0){
+			/* get footprint positions */
+			vector<int> fp = find_footprints(y, peaks);
+			if(fp.size() > 0){
+				vector<int> fp_pos(fp.size());
+				for(int i = 0; i < fp.size(); i++){
+					fp_pos[i] = (int)x[fp[i]];
+				}
+				// centres
+				int centre = (int)x[find_centre(peaks, fp)];
+				results->push_back((footprint_t){.peaks = peaks, .fp = fp_pos, .centre = centre, .peakidx = i}); 
+			}
+		}else{
+
+		}
 	}
-		
-	return NULL;
+	cerr << "Thread terminating: "<< syscall(SYS_gettid) << endl;		
+	return (void*)results;
 }
 
-int main(int argc, char* argv[]){
+int main(int argc, const char* argv[]){
 	/**
 	 * Usage: main [reads] [no. peaks] [no. reads]
 	 */
+	ArgumentParser parser;
+	parser.addArgument("-N", "--nreads", 1);
+	parser.addArgument("-P", "--npeaks", 1);
+	parser.addArgument("-B", "--bw", 1);
+	parser.addArgument("-T", "--absthresh", 1);
+	parser.addArgument("-t", "--relthresh", 1);
+	parser.addArgument("-p", "--prominence", 1);
+	parser.addArgument("-m", "--minreads", 1);
+	parser.addArgument("-n", "--threads", 1);
+	parser.addFinalArgument("input");
+	
+	parser.parse(argc, argv);
+	std::string reads_file_name_str = parser.retrieve<string>("input");
+	const char* reads_file_name = reads_file_name_str.c_str();
+	
+	int n_reads = stoi(parser.retrieve<string>("nreads"));
+	int n_peaks = stoi(parser.retrieve<string>("npeaks"));
 
-	const char* reads_file_name = argv[1];
-	int n_peaks = atoi(argv[2]);
-	int n_reads = atoi(argv[3]);
-
+	if(parser.retrieve<string>("bw") != "") param.bandwidth = stof(parser.retrieve<string>("bw"));
+	if(parser.retrieve<string>("absthresh") != "" ) param.abs_thresh = stof(parser.retrieve<string>("absthresh"));
+	if(parser.retrieve<string>("relthresh") != "" ) param.rel_thresh = stof(parser.retrieve<string>("relthresh"));
+	if(parser.retrieve<string>("prominence") != "" ) param.prominence = stof(parser.retrieve<string>("prominence"));
+	if(parser.retrieve<string>("minreads") != "" ) param.min_reads = stof(parser.retrieve<string>("minreads"));
+	
 	read_arr = new read_t[n_reads];
 	peak_idx = new read_range[n_peaks];
 
@@ -190,6 +264,7 @@ int main(int argc, char* argv[]){
 	/** code for multithreading **/
 
 	int n_threads = 1;
+	if(parser.retrieve<string>("threads") != "") n_threads = stoi(parser.retrieve<string>("threads")); 
 
 	pthread_t* threads;
 	void** thread_args;
@@ -233,9 +308,9 @@ int main(int argc, char* argv[]){
 	 *  thread_args will contain a std::pair<int, int> corresponding to [start_peak, end_peak]
 	 */
 
-	for(int i = 0; i < n_peaks; i++){
-		cout << "Size: " << peak_idx[i].end - peak_idx[i].begin << endl;
-	}
+	// for(int i = 0; i < n_peaks; i++){
+	// 	cout << "Size: " << peak_idx[i].end - peak_idx[i].begin << endl;
+	// }
 	
 	int split_size = n_peaks/n_threads;
 	int start = 0;	
@@ -248,12 +323,25 @@ int main(int argc, char* argv[]){
 
 	/** spawn worker threads **/
 	for(int i = 0; i < n_threads; i++){
-		cout << "Creating thread " << i << endl;
 		pthread_create(&threads[i], NULL, thread_worker, thread_args[i]);
 	}
 
 	for(int i = 0; i < n_threads; i++){
-		pthread_join(threads[i], NULL);
+		pthread_join(threads[i], &thread_retvals[i]);
+	}
+
+	cerr << "Finished processing peaks" << endl;
+
+	cout << "peakid n_peaks n_fp pos centre" << endl;
+	for(int i = 0; i < n_threads; i++){
+		// do somethign with output...
+		vector<footprint_t> *res = (vector<footprint_t>*)thread_retvals[i];
+		for(auto i:*res){
+			for(auto j:i.fp){
+				cout << i.peakidx+1 << " " << i.peaks.size() << " " << i.fp.size() << " " << j << " " << i.centre << endl;
+			}
+		}
+		delete res;
 	}
 
 	delete[] threads;
