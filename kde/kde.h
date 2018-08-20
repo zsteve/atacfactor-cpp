@@ -29,3 +29,4 @@
 #include <gsl/gsl_math.h>
 
 double kerneldensity(double *samples, double obs, size_t n);
+double gauss_kernel(double x);
