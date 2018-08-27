@@ -13,8 +13,8 @@
 #include <sys/types.h>
 #include <argparse/argparse.hpp>
 
-
 #include "kde/kde.h"
+
 using namespace std;
 
 char** chr_table = NULL;
@@ -338,7 +338,7 @@ int main(int argc, const char* argv[]){
 		vector<footprint_t> *res = (vector<footprint_t>*)thread_retvals[i];
 		for(auto i:*res){
 			for(auto j:i.fp){
-				cout << i.peakidx+1 << " " << i.peaks.size() << " " << i.fp.size() << " " << j << " " << i.centre << endl;
+				cout << i.peakidx+1 << "\t" << i.peaks.size() << "\t" << i.fp.size() << "\t" << j << "\t" << i.centre << endl;
 			}
 		}
 		delete res;
