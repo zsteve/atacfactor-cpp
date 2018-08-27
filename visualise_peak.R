@@ -24,3 +24,9 @@ g <- ggplot() + geom_line(aes(x = x, y = y), linetype = 'dashed') +
 g
 
 detach(d)
+
+# pileup of peaks
+n_fp = 1
+idx <- which(t$n_fp == n_fp)
+t_peak_fp <- t[idx, ]
+peak_ids <- unique(t_peak_fp$peakid)
