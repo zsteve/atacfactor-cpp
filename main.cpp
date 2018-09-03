@@ -1,3 +1,9 @@
+/**
+ * ATACfactor-C++
+ * Author: Stephen Zhang
+ * stephen.zhang@monash.edu
+ */
+
 #include <htslib/sam.h>
 #include <iostream>
 #include <fstream>

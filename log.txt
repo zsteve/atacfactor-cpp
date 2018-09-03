@@ -1,0 +1,37 @@
+27 Aug
+
+# output2:
+
+Used lower min.read threshold
+
+./main --nreads 47072549 --npeaks 34189 --bw 12 --absthresh 0 --relthresh 0.5 --prominence 0.9 --minreads 250 --threads 12 test_data/reads > output2
+
+# Try to use F-seq instead of macs2 v1.84
+
+Convert to bed
+bedtools bamtobed -i JV-22-PE_s.bam > JV-22-PE_s.bed
+
+fseq/fseq/bin/fseq -v --of bed -f 0 -d test_data/fseq_output/ -o test_data/fseq_output/ test_data/JV-22-PE_s.bed
+
+Peaks found: 29783 peak_fseq.bed
+
+# reindex peaks
+cat peak_fseq.bed | awk -F'    ' '{ print $1,'\t',$2,'\t',$3,'\t',NR,'\t',$5 }' > peak_fseq_adj.bed
+
+# try running atacfactor-cpp on fseq peak output
+
+python extract_reads.py -p test_data/fseq_output/peak_fseq.bed -a test_data/JV-22-PE_s.bam -o test_data/read_fseq
+./main --nreads 49082684 --npeaks 29783 --bw 12 --absthresh 0 --relthresh 0.5 --prominence 0.9 --minreads 250 --threads 12 test_data/reads_fseq_adj > output_fseq
+
+Split reads into split_fseq
+
+# Retry macs2 peak calling on Dm data
+# Drosophila_ATAC/peaks_retry
+# Set FDR cutoff to 0.7 (default 0.05 as q-value)
+# Hmmm... didn't change that much? some incrase in the #peaks but not that much
+
+Try now using F-seq to generate wigFile
+
+https://www.encodeproject.org/documents/0eb389f9-d23d-4053-b25b-1e2826ee5a86/@@download/attachment/ATACpipelineV7.pdf
+
+
