@@ -1,11 +1,7 @@
 library(ggplot2)
 library(Rcpp)
 
-# 
-# gaussian <- function(x){
-#   return(1/sqrt(2*pi)*exp(-0.5*x^2))
-# }
-
+# much faster than equivalent R code
 cppFunction('
     Rcpp::List kde_diff(NumericVector& x, int bw, NumericVector range){
       NumericVector out_y(512);
